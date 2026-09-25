@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signup form</title>
+<style>
+  /* Preview styles only. Your website's own styles will apply once the form is on your page. */
+  body { max-width: 30rem; margin: 3rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.5; }
+  .signup-form label { display: block; margin-top: 1rem; font-weight: 600; }
+  .signup-form input:not([type=checkbox]) { width: 100%; box-sizing: border-box; padding: 0.5rem; font: inherit; }
+  .signup-form fieldset label { font-weight: 400; margin-top: 0.25rem; }
+  .signup-form button { margin-top: 1.5rem; padding: 0.6rem 1.2rem; font: inherit; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<!--
+  Signup form for your website. See SETUP.md, step 8.
+
+  1. Copy everything from "COPY FROM HERE" to "COPY TO HERE" into your page.
+  2. Replace https://mailops.YOUR-SUBDOMAIN.workers.dev with your Worker's address.
+
+  The input names (FirstName, LastName, Email, Phone, Tags, Source) must stay as they are.
+  The ids and label text can be anything.
+-->
+
+<!-- COPY FROM HERE -->
+<form class="signup-form" action="https://mailops.YOUR-SUBDOMAIN.workers.dev" method="post">
+  <label for="signup-first-name">First name</label>
+  <input id="signup-first-name" name="FirstName" autocomplete="given-name" maxlength="100" required>
+
+  <label for="signup-last-name">Last name</label>
+  <input id="signup-last-name" name="LastName" autocomplete="family-name" maxlength="100" required>
+
+  <label for="signup-email">Email</label>
+  <input id="signup-email" name="Email" type="email" autocomplete="email" maxlength="254" required>
+
+  <label for="signup-phone">Phone (optional)</label>
+  <input id="signup-phone" name="Phone" type="tel" autocomplete="tel" maxlength="30">
+
+  <!-- Optional: let people choose what they hear about. Each value must also be listed in the
+       Worker's SIGNUP_TAGS setting, or it's ignored. Delete this block if you don't need it.
+  <fieldset>
+    <legend>I'm interested in</legend>
+    <label><input type="checkbox" name="Tags" value="Newsletter" checked> The monthly newsletter</label>
+    <label><input type="checkbox" name="Tags" value="Events"> Events near me</label>
+  </fieldset>
+  -->
+
+  <!-- Optional: record where people signed up. Shows in the contact's "Source". -->
+  <input type="hidden" name="Source" value="Website footer">
+
+  <!-- Spam trap: people never see this field, but bots fill it in. Keep it as is. -->
+  <div style="position: absolute; left: -10000px;" aria-hidden="true">
+    <label for="signup-website">Leave this empty</label>
+    <input id="signup-website" name="website" tabindex="-1" autocomplete="off">
+  </div>
+
+  <!-- Turnstile spam check (SETUP.md, step 9). To turn it on, delete the TURNSTILE-START and
+       TURNSTILE-END lines below and replace YOUR-TURNSTILE-SITE-KEY with your site key. -->
+  <!-- TURNSTILE-START
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <div class="cf-turnstile" data-sitekey="YOUR-TURNSTILE-SITE-KEY" style="margin-top: 1.5rem;"></div>
+  TURNSTILE-END -->
+
+  <button type="submit">Sign up</button>
+</form>
+<!-- COPY TO HERE -->
+
+</body>
+</html>

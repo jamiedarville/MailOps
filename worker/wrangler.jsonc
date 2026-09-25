@@ -1,0 +1,16 @@
+// Cloudflare settings for the MailOps Worker. See SETUP.md.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "mailops",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  // Don't delete variables set in the Cloudflare dashboard (like FROM_EMAIL) when deploying from here.
+  "keep_vars": true,
+  // Keep logs so you can see why something failed (dashboard → your Worker → Logs).
+  "observability": { "enabled": true },
+  // One CampaignRunner per campaign: it sends the campaign in batches and keeps its report.
+  "durable_objects": {
+    "bindings": [{ "name": "CAMPAIGNS", "class_name": "CampaignRunner" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CampaignRunner"] }]
+}

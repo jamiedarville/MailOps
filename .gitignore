@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+.dev.vars*
+
+# This repository is public. Contact data lives in a separate PRIVATE repository
+# (see SETUP.md), so never commit lists here.
+*.csv
+!data-template/*.csv

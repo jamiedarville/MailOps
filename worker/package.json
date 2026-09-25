@@ -1,0 +1,15 @@
+{
+  "name": "mailops",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Basic email marketing (signup forms, contacts, campaigns, reports) on Cloudflare Workers, storing data in a private GitHub repository",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.137.0"
+  }
+}
