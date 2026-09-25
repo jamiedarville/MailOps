@@ -4,6 +4,7 @@ import { STATUSES, loadContacts } from "../contacts.js";
 import { loadCampaigns } from "../campaigns.js";
 import { escapeHtml, formatDate, page } from "../html.js";
 import { isOn } from "../config.js";
+import { providerName } from "../mailer.js";
 import { isLoggedIn, isSameOrigin, login, logout } from "./auth.js";
 import { adminPage, badge, loginPage, redirect } from "./layout.js";
 import { bulkAction, contactsPage, editContactPage, exportContacts, importContacts, importPage, saveContact } from "./contacts.js";
@@ -65,13 +66,22 @@ async function dashboard(url, env, github, config) {
   const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const recent = contacts.records.filter((record) => record.Status === "subscribed" && String(record.CreatedAt) >= monthAgo).length;
 
+  const ses = providerName(config) === "ses";
   const checks = [
     [env.GITHUB_TOKEN, "GITHUB_TOKEN secret (saving contacts and campaigns)"],
-    [env.RESEND_API_KEY, "RESEND_API_KEY secret (sending email)"],
+    ...(ses
+      ? [
+          [env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY, "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY secrets (sending email with Amazon SES)"],
+          [config.SES_CONFIGURATION_SET, "SES_CONFIGURATION_SET variable (reports bounces, complaints and deliveries)"],
+          [config.SES_SNS_TOPIC_ARN, "SES_SNS_TOPIC_ARN variable (removes bounced addresses automatically)"],
+        ]
+      : [
+          [env.RESEND_API_KEY, "RESEND_API_KEY secret (sending email)"],
+          [env.RESEND_WEBHOOK_SECRET, "RESEND_WEBHOOK_SECRET secret (removes bounced addresses automatically)"],
+        ]),
     [config.FROM_EMAIL, "FROM_EMAIL variable (who campaigns come from)"],
     [config.MAILING_ADDRESS, "MAILING_ADDRESS variable (required by anti-spam laws)"],
     [config.PUBLIC_URL, "PUBLIC_URL variable (the address used in email links)"],
-    [env.RESEND_WEBHOOK_SECRET, "RESEND_WEBHOOK_SECRET secret (removes bounced addresses automatically)"],
     [env.TURNSTILE_SECRET_KEY, "TURNSTILE_SECRET_KEY secret (spam protection for the signup form)"],
   ];
   const missing = checks.filter(([value]) => !value);
@@ -94,7 +104,7 @@ ${
     ? `<div class="card"><h2 style="margin-top:0">Finish setting up</h2><p class="muted">These settings aren't set yet (see SETUP.md):</p><ul>${missing.map(([, label]) => `<li>${escapeHtml(label)}</li>`).join("")}</ul></div>`
     : ""
 }
-<div class="card"><p style="margin:0">Signup form: <a href="/">${escapeHtml(url.origin)}/</a> · Double opt-in is <b>${isOn(config.DOUBLE_OPT_IN) ? "on" : "off"}</b> · Tracking is <b>${isOn(config.TRACKING) ? "on" : "off"}</b></p></div>
+<div class="card"><p style="margin:0">Signup form: <a href="/">${escapeHtml(url.origin)}/</a> · Double opt-in is <b>${isOn(config.DOUBLE_OPT_IN) ? "on" : "off"}</b> · Tracking is <b>${isOn(config.TRACKING) ? "on" : "off"}</b> · Sending with <b>${ses ? `Amazon SES (${escapeHtml(config.AWS_REGION)})` : "Resend"}</b></p></div>
 <h2>Recent campaigns</h2>
 <div class="table-wrap"><table><thead><tr><th>Campaign</th><th>Status</th><th>Date</th></tr></thead>
 <tbody>${recentCampaigns || `<tr><td colspan="3" class="muted">None yet. <a href="/admin/campaigns">Create your first campaign</a>.</td></tr>`}</tbody></table></div>`;

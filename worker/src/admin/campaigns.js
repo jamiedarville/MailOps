@@ -4,7 +4,7 @@ import { loadContacts } from "../contacts.js";
 import { campaignFromForm, findCampaign, loadCampaigns, newCampaignId, sendProblems, setCampaignFields, updateCampaigns } from "../campaigns.js";
 import { escapeHtml, formatDate, utcToZonedInput, zonedTimeToUtc } from "../html.js";
 import { unsubscribeUrl } from "../links.js";
-import { sendEmail } from "../mailer.js";
+import { providerProblems, sendEmail } from "../mailer.js";
 import { callRunner } from "../public.js";
 import { buildTemplate, personalize } from "../render.js";
 import { adminPage, badge, percent, problems, redirect } from "./layout.js";
@@ -194,7 +194,7 @@ export async function saveCampaign(form, request, env, github, config) {
 function setupProblems(env, config) {
   const missing = [];
   if (!config.FROM_EMAIL) missing.push("Set the FROM_EMAIL variable (SETUP.md).");
-  if (!env.RESEND_API_KEY) missing.push("Set the RESEND_API_KEY secret (SETUP.md).");
+  missing.push(...providerProblems(env, config));
   if (!env.CAMPAIGNS) missing.push("The CAMPAIGNS Durable Object binding is missing. Deploy with `npx wrangler deploy` (SETUP.md).");
   if (!config.MAILING_ADDRESS) missing.push("Set the MAILING_ADDRESS variable. Anti-spam laws require a postal address in every campaign (SETUP.md).");
   return missing;

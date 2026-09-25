@@ -30,6 +30,21 @@ export const DEFAULTS = {
   SIGNUP_TAGS: "",
   // "false" turns off open and click tracking.
   TRACKING: "true",
+
+  // Who delivers the email: "resend" or "ses" (Amazon SES).
+  EMAIL_PROVIDER: "resend",
+  // Amazon SES settings (only used when EMAIL_PROVIDER is "ses"). The keys are secrets:
+  // AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.
+  AWS_REGION: "us-east-1",
+  // Configuration set whose event destination sends bounces, complaints and deliveries to SNS.
+  SES_CONFIGURATION_SET: "",
+  // The SNS topic(s) allowed to post to /webhooks/ses (comma-separated ARNs).
+  SES_SNS_TOPIC_ARN: "",
+  // Emails per second. Keep it at or below your SES account's maximum send rate.
+  SES_MAX_SEND_RATE: "10",
+  // Emails sent per background run. 40 fits the Workers free plan (50 requests per run);
+  // on the Workers Paid plan it can go up to several hundred.
+  SES_EMAILS_PER_RUN: "40",
 };
 
 export function settings(env) {
@@ -52,4 +67,10 @@ export function publicUrl(config, request) {
 export function requireSecret(env, name) {
   if (!env[name]) throw new Error(`The ${name} secret is not set (see SETUP.md).`);
   return env[name];
+}
+
+// Reads a whole-number setting, keeping it between min and max.
+export function intSetting(value, min, max, fallback) {
+  const number = Math.floor(Number(value));
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
 }

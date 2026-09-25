@@ -46,6 +46,11 @@ export function setup(files = {}, { env: extraEnv = {}, turnstile = true, resend
     runners: new Map(),
     pending: [],
     resendStatus,
+    sesRequests: [],
+    // Set to a function (callNumber, body) => Response to make SES fail.
+    sesFailure: null,
+    snsCertPem: "",
+    snsFetches: [],
   };
   const env = {
     GITHUB_TOKEN: "test-token",
@@ -86,6 +91,31 @@ export function setup(files = {}, { env: extraEnv = {}, turnstile = true, resend
     const url = String(input);
     world.requests.push({ url, init });
     if (url.startsWith("https://challenges.cloudflare.com/")) return Response.json({ success: turnstile });
+    const ses = /^https:\/\/email\.([a-z0-9-]+)\.amazonaws\.com\/v2\/email\/outbound-emails$/.exec(url);
+    if (ses) {
+      const headers = init.headers;
+      assert.match(headers.authorization, new RegExp(`^AWS4-HMAC-SHA256 Credential=AKIATEST/\\d{8}/${ses[1]}/ses/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=[0-9a-f]{64}$`));
+      assert.match(headers["x-amz-date"], /^\d{8}T\d{6}Z$/);
+      const body = JSON.parse(init.body);
+      world.sesRequests.push({ region: ses[1], body });
+      const failure = world.sesFailure?.(world.sesRequests.length, body);
+      if (failure) return failure;
+      // Also recorded in the provider-neutral shape, so tests can look at every email the same way.
+      world.emails.push({
+        from: body.FromEmailAddress,
+        to: body.Destination.ToAddresses,
+        subject: body.Content.Simple.Subject.Data,
+        html: body.Content.Simple.Body.Html?.Data,
+        text: body.Content.Simple.Body.Text?.Data,
+        headers: Object.fromEntries((body.Content.Simple.Headers ?? []).map((h) => [h.Name, h.Value])),
+        tags: (body.EmailTags ?? []).map((t) => ({ name: t.Name, value: t.Value })),
+      });
+      return Response.json({ MessageId: `ses-${world.sesRequests.length}` });
+    }
+    if (/^https:\/\/sns\.[a-z0-9-]+\.amazonaws\.com\//.test(url)) {
+      world.snsFetches.push(url);
+      return url.endsWith(".pem") ? new Response(world.snsCertPem) : new Response("<ConfirmSubscriptionResponse/>");
+    }
     if (url.startsWith("https://api.resend.com/")) {
       assert.equal(init.headers.Authorization, "Bearer re_test");
       if (world.resendStatus !== 200) return new Response("nope", { status: world.resendStatus });

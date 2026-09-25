@@ -4,7 +4,7 @@ import { GitHub } from "./github.js";
 import { EMAIL_PATTERN, FORM_FIELDS, addTags, normalizeEmail, parseTags, updateContacts } from "./contacts.js";
 import { BACK_BUTTON, errorPage, escapeHtml, page } from "./html.js";
 import { confirmUrl } from "./links.js";
-import { sendEmail } from "./mailer.js";
+import { providerProblems, sendEmail } from "./mailer.js";
 import { decodeParam, verify } from "./tokens.js";
 import { ID_PATTERN } from "./campaigns.js";
 
@@ -71,7 +71,8 @@ export async function handleSignup(request, env, config) {
   const doubleOptIn = isOn(config.DOUBLE_OPT_IN);
   if (doubleOptIn) {
     requireSecret(env, "SIGNING_SECRET");
-    requireSecret(env, "RESEND_API_KEY");
+    const missing = providerProblems(env, config);
+    if (missing.length) throw new Error(`DOUBLE_OPT_IN is on but email sending isn't set up: ${missing.join(" ")}`);
     if (!config.FROM_EMAIL) throw new Error("DOUBLE_OPT_IN is on but FROM_EMAIL is not set (see SETUP.md).");
   }
   const allowedTags = parseTags(config.SIGNUP_TAGS);

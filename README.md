@@ -11,6 +11,7 @@ It grew out of [email-db](https://github.com/jamiedarville/email-db) (a signup f
 - **Signup forms** for your website, with spam protection (hidden spam trap and Cloudflare Turnstile), optional **double opt-in** by email, and optional interest checkboxes that tag people.
 - **Contacts**: search, filter by status or tag, edit, tag in bulk, **import** CSV (including exports from email-db and Mailchimp) and **export** CSV.
 - **Campaigns**: write in Markdown (or HTML) with merge tags like `{{FirstName|there}}`, preview, send yourself a test, choose an audience by tag, then **send now** or **schedule**.
+- **Sending through Resend or Amazon SES**, switched with one setting.
 - **Reports**: sent, delivered, opens, clicks (per link), unsubscribes, bounces and spam complaints.
 - **Compliance built in**: every campaign has an unsubscribe link and your postal address, and supports one-click unsubscribe (required by Gmail and Yahoo for bulk senders). Hard bounces and spam complaints are removed from your list automatically.
 
@@ -23,10 +24,10 @@ Your website's form ─┐
                /admin dashboard                        in your PRIVATE GitHub repository
                      │
                      ▼
-        CampaignRunner (Durable Object) ── sends in batches of 100 ──▶ Resend ──▶ inboxes
-        keeps each campaign's report                                     │
-                     ▲                                                   │
-                     └──── opens, clicks, unsubscribes, bounces ◀────────┘
+        CampaignRunner (Durable Object) ──── sends, paced ────▶ Resend or SES ──▶ inboxes
+        keeps each campaign's report                                      │
+                     ▲                                                    │
+                     └──── opens, clicks, unsubscribes, bounces ◀─────────┘
 ```
 
 **This repository is public and holds only code.** Contacts never go in it: the Worker saves them to a separate private repository (`mailops-data` by default), and `.gitignore` blocks CSV files here as a safety net.

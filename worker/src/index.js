@@ -8,12 +8,13 @@
  *   /unsubscribe           unsubscribes, including one-click unsubscribe from mail apps
  *   /t/…                   open and click tracking
  *   POST /webhooks/resend  bounces and spam complaints from Resend
+ *   POST /webhooks/ses     bounces and spam complaints from Amazon SES (through SNS)
  *   /admin                 the dashboard: contacts, campaigns, reports
  */
 import { settings } from "./config.js";
 import { page, BACK_BUTTON } from "./html.js";
 import { handleConfirm, handleSignup, handleTracking, handleUnsubscribe, signupForm } from "./public.js";
-import { handleResendWebhook } from "./webhooks.js";
+import { handleResendWebhook, handleSesWebhook } from "./webhooks.js";
 import { handleAdmin } from "./admin/index.js";
 
 export { CampaignRunner } from "./runner.js";
@@ -29,6 +30,7 @@ export default {
       if (pathname === "/unsubscribe" && ["GET", "HEAD", "POST"].includes(method)) return await handleUnsubscribe(request, env, config);
       if (pathname === "/confirm" && ["GET", "HEAD", "POST"].includes(method)) return await handleConfirm(request, env, config);
       if (pathname === "/webhooks/resend" && method === "POST") return await handleResendWebhook(request, env, config);
+      if (pathname === "/webhooks/ses" && method === "POST") return await handleSesWebhook(request, env, config);
       if (pathname === "/" || pathname === "/subscribe") {
         if (method === "GET" || method === "HEAD") return signupForm(config);
         if (method === "POST") return await handleSignup(request, env, config);

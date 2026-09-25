@@ -1,15 +1,17 @@
 // CampaignRunner: a Durable Object that sends one campaign and keeps its report.
 //
 // There's one per campaign. When a campaign is scheduled it sets an alarm for the send time.
-// The alarm takes a snapshot of the audience from contacts.csv, then sends in batches of 100,
-// setting a new alarm after each couple of batches until everyone has been emailed. It also
-// counts deliveries, opens, clicks, unsubscribes, bounces and complaints for the report.
-import { isOn, settings } from "./config.js";
+// The alarm takes a snapshot of the audience from contacts.csv, stores it in batches of 100,
+// and starts sending, setting a new alarm after each run until everyone has been emailed:
+// with Resend, a couple of 100-email batch requests per run; with Amazon SES, one request per
+// email, paced to SES_MAX_SEND_RATE. It also counts deliveries, opens, clicks, unsubscribes,
+// bounces and complaints for the report.
+import { intSetting, isOn, settings } from "./config.js";
 import { GitHub } from "./github.js";
 import { loadContacts } from "./contacts.js";
 import { setCampaignFields } from "./campaigns.js";
 import { buildTemplate, personalize } from "./render.js";
-import { BATCH_SIZE, sendBatch } from "./mailer.js";
+import { BATCH_SIZE, providerName, providerProblems, sendBatch, sendWithSes } from "./mailer.js";
 import { trackingUrls, unsubscribeUrl } from "./links.js";
 
 const BATCHES_PER_RUN = 2; // Resend allows a few requests a second
@@ -17,6 +19,8 @@ const PAUSE_MS = 1000;
 const MAX_ATTEMPTS = 8;
 const FLAGS = { delivered: 1, open: 2, click: 4, unsubscribe: 8, bounce: 16, complaint: 32 };
 const DO_NOT_SEND = FLAGS.unsubscribe | FLAGS.bounce | FLAGS.complaint;
+// Marks a recipient as already emailed (SES has no idempotency keys, so retries check this).
+const SENT = 64;
 // Contact columns that aren't sent along as merge fields.
 const INTERNAL_COLUMNS = ["Status", "Source", "CreatedAt", "UpdatedAt"];
 
@@ -121,8 +125,13 @@ export class CampaignRunner {
     if (!meta || !["scheduled", "sending"].includes(meta.state)) return;
     try {
       if (meta.state === "scheduled") meta = await this.prepare(meta);
-      for (let i = 0; i < BATCHES_PER_RUN && meta.state === "sending" && meta.nextBatch < meta.batches; i++) {
-        meta = await this.sendNextBatch(meta);
+      const config = settings(this.env);
+      if (providerName(config) === "ses") {
+        meta = await this.sendWithSes(meta, config);
+      } else {
+        for (let i = 0; i < BATCHES_PER_RUN && meta.state === "sending" && meta.nextBatch < meta.batches; i++) {
+          meta = await this.sendNextBatch(meta, config);
+        }
       }
       if (meta.state !== "sending") return;
       if (meta.nextBatch < meta.batches) {
@@ -151,6 +160,8 @@ export class CampaignRunner {
   async prepare(meta) {
     const config = settings(this.env);
     if (!config.FROM_EMAIL) throw new Error("FROM_EMAIL is not set (see SETUP.md).");
+    const missing = providerProblems(this.env, config);
+    if (missing.length) throw new Error(missing.join(" "));
     if (!this.env.SIGNING_SECRET) throw new Error("The SIGNING_SECRET secret is not set (see SETUP.md).");
     const contacts = await loadContacts(new GitHub(this.env, config), config);
     const recipients = contacts.audience(meta.campaign.audience).map((record, rid) => ({
@@ -171,33 +182,17 @@ export class CampaignRunner {
     return latest;
   }
 
-  async sendNextBatch(meta) {
-    const config = settings(this.env);
+  // Resend: sends the next stored batch as one request.
+  async sendNextBatch(meta, config) {
     const batch = meta.nextBatch;
     const recipients = (await this.storage.get(`batch:${batch}`)) ?? [];
     const template = await this.storage.get("template");
     const seen = recipients.length ? await this.storage.get(recipients.map((r) => `seen:${r.rid}`)) : new Map();
-    const tracking = isOn(config.TRACKING);
 
     const emails = [];
     for (const recipient of recipients) {
       if ((seen.get(`seen:${recipient.rid}`) ?? 0) & DO_NOT_SEND) continue;
-      const unsubscribe = await unsubscribeUrl(meta.baseUrl, this.env.SIGNING_SECRET, recipient.email, meta.id, recipient.rid);
-      const urls = { unsubscribe, ...(tracking && (await trackingUrls(meta.baseUrl, this.env.SIGNING_SECRET, meta.id, recipient.rid))) };
-      const message = personalize(template, recipient.fields, urls);
-      emails.push({
-        from: config.FROM_EMAIL,
-        to: [recipient.email],
-        subject: message.subject,
-        html: message.html,
-        text: message.text,
-        ...(config.REPLY_TO && { reply_to: config.REPLY_TO }),
-        headers: { "List-Unsubscribe": `<${unsubscribe}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
-        tags: [
-          { name: "campaign", value: meta.id },
-          { name: "rid", value: String(recipient.rid) },
-        ],
-      });
+      emails.push(await this.buildEmail(meta, config, template, recipient));
     }
     await sendBatch(this.env, emails, `${meta.id}-batch-${batch}`);
 
@@ -210,6 +205,78 @@ export class CampaignRunner {
     delete latest.lastError;
     await this.storage.put("meta", latest);
     return latest;
+  }
+
+  // Amazon SES: one request per email, in waves of SES_MAX_SEND_RATE a second, up to
+  // SES_EMAILS_PER_RUN per run. Each recipient is marked as sent as soon as SES accepts their
+  // email, so a retry after a failure carries on where it stopped instead of starting over.
+  async sendWithSes(meta, config) {
+    const rate = intSetting(config.SES_MAX_SEND_RATE, 1, 500, 10);
+    let budget = intSetting(config.SES_EMAILS_PER_RUN, 1, 5000, 40);
+    const template = await this.storage.get("template");
+
+    while (budget > 0 && meta.state === "sending" && meta.nextBatch < meta.batches) {
+      const batch = meta.nextBatch;
+      const recipients = (await this.storage.get(`batch:${batch}`)) ?? [];
+      const keys = recipients.map((r) => `seen:${r.rid}`);
+      let seen = recipients.length ? await this.storage.get(keys) : new Map();
+      const todo = recipients.filter((r) => !((seen.get(`seen:${r.rid}`) ?? 0) & (SENT | DO_NOT_SEND)));
+
+      while (todo.length && budget > 0) {
+        const wave = todo.splice(0, Math.min(rate, budget));
+        budget -= wave.length;
+        const started = Date.now();
+        const results = await Promise.allSettled(wave.map(async (recipient) => sendWithSes(this.env, config, await this.buildEmail(meta, config, template, recipient))));
+
+        // Record who got it before anything else, re-reading the flags in case events came in meanwhile.
+        const delivered = wave.filter((_, i) => results[i].status === "fulfilled");
+        if (delivered.length) {
+          const current = await this.storage.get(delivered.map((r) => `seen:${r.rid}`));
+          await this.storage.put(Object.fromEntries(delivered.map((r) => [`seen:${r.rid}`, (current.get(`seen:${r.rid}`) ?? 0) | SENT])));
+        }
+        meta = await this.storage.get("meta");
+        meta.sent = (meta.sent ?? 0) + delivered.length;
+        if (delivered.length) {
+          meta.attempts = 0;
+          delete meta.lastError;
+        }
+        await this.storage.put("meta", meta);
+        const failure = results.find((result) => result.status === "rejected");
+        if (failure) throw failure.reason;
+        if (meta.state !== "sending") return meta;
+        if (todo.length && budget > 0) await sleep(started + 1000 - Date.now());
+      }
+
+      if (!todo.length) {
+        seen = await this.storage.get(keys);
+        const skipped = recipients.filter((r) => !((seen.get(`seen:${r.rid}`) ?? 0) & SENT)).length;
+        meta = await this.storage.get("meta");
+        meta.nextBatch = batch + 1;
+        meta.skipped = (meta.skipped ?? 0) + skipped;
+        await this.storage.put("meta", meta);
+      }
+    }
+    return meta;
+  }
+
+  async buildEmail(meta, config, template, recipient) {
+    const tracking = isOn(config.TRACKING);
+    const unsubscribe = await unsubscribeUrl(meta.baseUrl, this.env.SIGNING_SECRET, recipient.email, meta.id, recipient.rid);
+    const urls = { unsubscribe, ...(tracking && (await trackingUrls(meta.baseUrl, this.env.SIGNING_SECRET, meta.id, recipient.rid))) };
+    const message = personalize(template, recipient.fields, urls);
+    return {
+      from: config.FROM_EMAIL,
+      to: [recipient.email],
+      subject: message.subject,
+      html: message.html,
+      text: message.text,
+      ...(config.REPLY_TO && { reply_to: config.REPLY_TO }),
+      headers: { "List-Unsubscribe": `<${unsubscribe}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
+      tags: [
+        { name: "campaign", value: meta.id },
+        { name: "rid", value: String(recipient.rid) },
+      ],
+    };
   }
 
   async finish(meta) {
@@ -225,4 +292,8 @@ export class CampaignRunner {
     const config = settings(this.env);
     return setCampaignFields(new GitHub(this.env, config), config, meta.id, fields, `Campaign ${meta.id}: ${fields.status}`);
   }
+}
+
+function sleep(ms) {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
